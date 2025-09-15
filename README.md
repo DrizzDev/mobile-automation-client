@@ -1,4 +1,4 @@
-# Mobile Automation Service - Python Edition
+# Mobile Automation Service
 
 A production-ready, cross-platform mobile device automation service built in Python with WebSocket communication. This service provides comprehensive automation capabilities for Android devices and iOS simulators.
 
