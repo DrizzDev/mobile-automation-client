@@ -8,8 +8,8 @@ import base64
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
-from src.robot import Robot, ActionableError
-from src.types import (
+from robot import Robot, ActionableError
+from enums import (
     InstalledApp,
     ScreenElement,
     ScreenSize,
@@ -20,8 +20,8 @@ from src.types import (
     DeviceInfo,
     DeviceType,
 )
-from src.config import config
-from src.utils.logger import get_logger
+from config import config
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -318,6 +318,22 @@ class IosRobot(Robot):
             logger.error(f"Failed to launch app {package_name}: {e}")
             raise
 
+    async def get_installed_apps(self) -> List[dict]:
+        """Get installed apps in dictionary format."""
+        try:
+            apps = await self.list_apps()
+            return [
+                {
+                    "package_name": app.package_name,
+                    "app_name": app.app_name,
+                    "is_system_app": app.is_system_app
+                }
+                for app in apps
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get installed apps: {e}")
+            raise
+
     async def terminate_app(self, package_name: str) -> None:
         """Terminate application."""
         await self._ensure_session()
@@ -333,6 +349,60 @@ class IosRobot(Robot):
         except Exception as e:
             logger.error(f"Failed to terminate app {package_name}: {e}")
             raise
+    
+    async def is_app_running(self, package_name: str) -> bool:
+        """Check if specific app is currently running."""
+        await self._ensure_session()
+        
+        try:
+            # Get current app state
+            response = requests.get(
+                urljoin(self.wda.base_url, f"/session/{self.wda.session_id}/wda/apps/state"),
+                params={"bundleId": package_name},
+                timeout=self.wda.timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            # State values: 0=not installed, 1=not running, 2=running in background, 3=running in foreground, 4=running
+            app_state = data.get("value", 0)
+            return app_state >= 2  # Running in background or foreground
+            
+        except Exception as e:
+            logger.error(f"Failed to check if app {package_name} is running: {e}")
+            return False
+    
+    async def get_running_apps(self) -> List[dict]:
+        """Get list of currently running apps."""
+        await self._ensure_session()
+        
+        try:
+            # This is a simplified implementation
+            # iOS doesn't easily provide a list of all running apps due to security restrictions
+            # In practice, you'd need to use private APIs or system tools
+            
+            # For now, return a placeholder with the current foreground app if available
+            response = requests.get(
+                urljoin(self.wda.base_url, f"/session/{self.wda.session_id}/wda/activeAppInfo"),
+                timeout=self.wda.timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            active_app = data.get("value", {})
+            
+            if active_app and active_app.get("bundleId"):
+                return [{
+                    "package_name": active_app["bundleId"],
+                    "is_foreground": True,
+                    "app_name": active_app.get("name", "Unknown")
+                }]
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Failed to get running apps: {e}")
+            return []
 
     # Screen interaction
     async def tap(self, x: int, y: int) -> None:
@@ -508,6 +578,68 @@ class IosRobot(Robot):
             
         except Exception as e:
             logger.error(f"Failed to get UI elements: {e}")
+            return []
+    
+    async def get_elements(self) -> List[dict]:
+        """Get screen elements in dictionary format for API compatibility."""
+        await self._ensure_session()
+        
+        try:
+            # Use WDA element tree endpoint for better iOS app info
+            response = requests.get(
+                urljoin(self.wda.base_url, f"/session/{self.wda.session_id}/wda/element/tree"),
+                timeout=self.wda.timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            tree_data = data.get("value", {})
+            
+            def parse_ios_element(element: dict) -> dict:
+                """Convert iOS element tree to dictionary format."""
+                bounds = element.get("rect", {})
+                element_dict = {
+                    "class_name": element.get("type"),
+                    "text": element.get("value") or element.get("label"),
+                    "content_desc": element.get("name"),
+                    "resource_id": element.get("identifier"),
+                    "bounds": {
+                        "x": bounds.get("x", 0),
+                        "y": bounds.get("y", 0),
+                        "width": bounds.get("width", 0),
+                        "height": bounds.get("height", 0)
+                    },
+                    "clickable": element.get("enabled", False),
+                    "focusable": element.get("focused", False),
+                    "enabled": element.get("enabled", True),
+                    "visible": element.get("visible", True),
+                    "children": []
+                }
+                
+                # Try to extract package from bundle ID or class name
+                package = None
+                class_name = element.get("type", "")
+                if "." in class_name:
+                    parts = class_name.split(".")
+                    if len(parts) >= 3:  # Typical iOS bundle format: com.company.app.Class
+                        package = ".".join(parts[:3])  # Take first 3 parts
+                
+                if package:
+                    element_dict["package"] = package
+                
+                # Parse children recursively
+                for child in element.get("children", []):
+                    element_dict["children"].append(parse_ios_element(child))
+                
+                return element_dict
+            
+            if tree_data:
+                return [parse_ios_element(tree_data)]
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Failed to get elements: {e}")
             return []
 
     async def set_orientation(self, orientation: Orientation) -> None:

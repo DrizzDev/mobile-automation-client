@@ -9,10 +9,18 @@ from dotenv import load_dotenv
 class Config(BaseModel):
     """Application configuration."""
 
-    # WebSocket Server
+    # WebSocket Server (Legacy - for backward compatibility)
     websocket_host: str = "localhost"
     websocket_port: int = 8765
     websocket_max_connections: int = 10
+    
+    # WebSocket Client (New - connects to backend server)
+    backend_server_url: str = "wss://your-backend-server.com/ws"
+    connection_retry_max: int = 5
+    connection_retry_delay: float = 1.0
+    connection_retry_max_delay: float = 60.0
+    health_check_interval: int = 30
+    connection_timeout: int = 10
 
     # Logging
     log_level: str = "INFO"
@@ -57,6 +65,13 @@ class Config(BaseModel):
             websocket_port=int(os.getenv("WEBSOCKET_PORT", "8765")),
             websocket_max_connections=int(os.getenv("WEBSOCKET_MAX_CONNECTIONS", "10")),
             
+            backend_server_url=os.getenv("BACKEND_SERVER_URL", "wss://your-backend-server.com/ws"),
+            connection_retry_max=int(os.getenv("CONNECTION_RETRY_MAX", "5")),
+            connection_retry_delay=float(os.getenv("CONNECTION_RETRY_DELAY", "1.0")),
+            connection_retry_max_delay=float(os.getenv("CONNECTION_RETRY_MAX_DELAY", "60.0")),
+            health_check_interval=int(os.getenv("HEALTH_CHECK_INTERVAL", "30")),
+            connection_timeout=int(os.getenv("CONNECTION_TIMEOUT", "10")),
+            
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             log_format=os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
             log_file_path=os.getenv("LOG_FILE_PATH", "logs/mobile-automation.log"),
@@ -80,7 +95,6 @@ class Config(BaseModel):
             websocket_auth_token=os.getenv("WEBSOCKET_AUTH_TOKEN"),
             
             telemetry_enabled=os.getenv("TELEMETRY_ENABLED", "false").lower() == "true",
-            health_check_interval=int(os.getenv("HEALTH_CHECK_INTERVAL", "60")),
             metrics_enabled=os.getenv("METRICS_ENABLED", "false").lower() == "true",
         )
 

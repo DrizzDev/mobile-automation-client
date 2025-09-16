@@ -8,8 +8,8 @@ import re
 import json
 from pathlib import Path
 
-from src.robot import Robot, ActionableError
-from src.types import (
+from robot import Robot, ActionableError
+from enums import (
     InstalledApp,
     ScreenElement,
     ScreenSize,
@@ -20,8 +20,8 @@ from src.types import (
     DeviceInfo,
     DeviceType,
 )
-from src.config import config
-from src.utils.logger import get_logger
+from config import config
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -121,8 +121,8 @@ class AndroidDeviceManager:
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=result.returncode,
-                stdout=stdout.decode('utf-8', errors='ignore'),
-                stderr=stderr.decode('utf-8', errors='ignore')
+                stdout=stdout.decode('utf-8', errors='replace'),
+                stderr=stderr.decode('utf-8', errors='replace')
             )
             
         except asyncio.TimeoutError:
@@ -205,6 +205,22 @@ class AndroidRobot(Robot):
             logger.error(f"Failed to launch app {package_name}: {e}")
             raise
 
+    async def get_installed_apps(self) -> List[dict]:
+        """Get installed apps in dictionary format."""
+        try:
+            apps = await self.list_apps()
+            return [
+                {
+                    "package_name": app.package_name,
+                    "app_name": app.app_name,
+                    "is_system_app": app.is_system_app
+                }
+                for app in apps
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get installed apps: {e}")
+            raise
+
     async def terminate_app(self, package_name: str) -> None:
         """Terminate application."""
         try:
@@ -212,6 +228,62 @@ class AndroidRobot(Robot):
         except Exception as e:
             logger.error(f"Failed to terminate app {package_name}: {e}")
             raise
+    
+    async def is_app_running(self, package_name: str) -> bool:
+        """Check if specific app is currently running."""
+        try:
+            # Get running apps and check if our package is in the list
+            running_apps = await self.get_running_apps()
+            
+            for app in running_apps:
+                if isinstance(app, dict) and app.get("package_name") == package_name:
+                    return True
+                elif isinstance(app, str) and app == package_name:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to check if app {package_name} is running: {e}")
+            return False
+    
+    async def get_running_apps(self) -> List[dict]:
+        """Get list of currently running apps."""
+        try:
+            # Use dumpsys to get running processes
+            output = await self._run_shell_command("dumpsys activity activities | grep 'ResumedActivity'")
+            running_apps = []
+            
+            for line in output.splitlines():
+                # Look for pattern like: ResumedActivity: ActivityRecord{...} u0 com.example.app/.MainActivity t123}
+                match = re.search(r'\s+([a-zA-Z0-9_.]+)/[a-zA-Z0-9_.]+', line)
+                if match:
+                    package_name = match.group(1)
+                    running_apps.append({
+                        "package_name": package_name,
+                        "is_foreground": True
+                    })
+            
+            # If no resumed activity found, try a different approach
+            if not running_apps:
+                # Get all running processes and filter for app packages
+                ps_output = await self._run_shell_command("ps | grep -v 'root\|system\|shell\|radio'")
+                for line in ps_output.splitlines():
+                    parts = line.split()
+                    if len(parts) > 8:  # Make sure we have enough columns
+                        process_name = parts[-1]  # Last column is usually the process name
+                        # Filter for app-like package names (contain dots)
+                        if '.' in process_name and not process_name.startswith('/') and ':' not in process_name:
+                            running_apps.append({
+                                "package_name": process_name,
+                                "is_foreground": False
+                            })
+            
+            return running_apps
+            
+        except Exception as e:
+            logger.error(f"Failed to get running apps: {e}")
+            return []
 
     # Screen interaction
     async def tap(self, x: int, y: int) -> None:
@@ -327,14 +399,22 @@ class AndroidRobot(Robot):
     async def get_screenshot(self) -> bytes:
         """Get screenshot as PNG bytes."""
         try:
-            result = await self.adb_manager._run_adb_command([
-                "-s", self.device_id, "exec-out", "screencap", "-p"
-            ])
+            # Use raw subprocess to get binary data directly
+            import subprocess
+            cmd = [self.adb_manager.adb_path, "-s", self.device_id, "exec-out", "screencap", "-p"]
+            
+            result = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await result.communicate()
             
             if result.returncode != 0:
-                raise Exception(f"Screenshot failed: {result.stderr}")
+                raise Exception(f"Screenshot failed: {stderr.decode('utf-8', errors='replace')}")
             
-            return result.stdout.encode('latin1')  # ADB returns binary data
+            return stdout  # Return raw binary data
             
         except Exception as e:
             logger.error(f"Failed to get screenshot: {e}")
@@ -410,6 +490,54 @@ class AndroidRobot(Robot):
             
         except Exception as e:
             logger.error(f"Failed to get UI elements: {e}")
+            return []
+    
+    async def get_elements(self) -> List[dict]:
+        """Get screen elements in dictionary format for API compatibility."""
+        try:
+            elements = await self.get_elements_on_screen()
+            
+            def convert_element(element: ScreenElement) -> dict:
+                """Convert ScreenElement to dictionary format."""
+                element_dict = {
+                    "class_name": element.class_name,
+                    "text": element.text,
+                    "content_desc": element.content_desc,
+                    "resource_id": element.resource_id,
+                    "bounds": element.bounds,
+                    "clickable": element.clickable,
+                    "focusable": element.focusable,
+                    "enabled": element.enabled,
+                    "visible": element.visible,
+                    "children": []
+                }
+                
+                # Try to extract package name from resource_id or class_name
+                package = None
+                if element.resource_id and ':' in element.resource_id:
+                    package = element.resource_id.split(':')[0]
+                elif element.class_name and '.' in element.class_name:
+                    parts = element.class_name.split('.')
+                    if len(parts) >= 2:
+                        package = '.'.join(parts[:-1])  # Everything except the last part
+                
+                if package:
+                    element_dict["package"] = package
+                
+                # Convert children recursively
+                for child in element.children:
+                    element_dict["children"].append(convert_element(child))
+                
+                return element_dict
+            
+            result = []
+            for element in elements:
+                result.append(convert_element(element))
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get elements: {e}")
             return []
 
     async def set_orientation(self, orientation: Orientation) -> None:

@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from .types import (
+from enums import (
     InstalledApp,
     ScreenElement,
     ScreenSize,
@@ -31,11 +31,26 @@ class Robot(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_installed_apps(self) -> List[dict]:
+        """Get installed apps in dictionary format."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def launch_app(self, package_name: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
     async def terminate_app(self, package_name: str) -> None:
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def is_app_running(self, package_name: str) -> bool:
+        """Check if specific app is currently running."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def get_running_apps(self) -> List[dict]:
+        """Get list of currently running apps."""
         raise NotImplementedError
 
     # Screen interaction
@@ -81,6 +96,11 @@ class Robot(ABC):
 
     @abstractmethod
     async def get_elements_on_screen(self) -> List[ScreenElement]:
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def get_elements(self) -> List[dict]:
+        """Get screen elements in dictionary format for API compatibility."""
         raise NotImplementedError
 
     @abstractmethod

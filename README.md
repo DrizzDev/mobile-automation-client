@@ -1,17 +1,17 @@
 # Mobile Automation Service
 
-A production-ready, cross-platform mobile device automation service built in Python with WebSocket communication. This service provides comprehensive automation capabilities for Android devices and iOS simulators.
+A production-ready, cross-platform mobile device automation service built in Python with WebSocket client architecture. This service connects to your backend server and provides comprehensive automation capabilities for Android devices and iOS simulators.
 
 ## 🚀 Features
 
 - **Cross-Platform Support**: Android (via ADB) and iOS Simulators (via WebDriverAgent/simctl)
-- **WebSocket API**: Real-time communication with JSON message protocol
+- **WebSocket Client**: Connects to your backend server for centralized control
 - **Production Ready**: Docker support, health checks, logging, configuration management
-- **Extensible Architecture**: SOLID principles with clear separation of concerns
+- **Robust Connection**: Automatic retry, fallback mechanisms, and reconnection
 - **Error Handling**: Actionable vs. technical error classification
-- **Session Management**: Per-connection device selection and state
+- **Device Management**: Local device detection and robot instantiation
 - **Image Processing**: Optional ImageMagick integration with PIL fallback
-- **Testing Suite**: Unit tests and integration test framework
+- **Comprehensive Testing**: Unit tests, integration tests, and interactive testing
 
 ## 📋 Prerequisites
 
@@ -23,6 +23,7 @@ A production-ready, cross-platform mobile device automation service built in Pyt
 
 ### Production Deployment
 - Docker and Docker Compose
+- Backend server with WebSocket support
 - Access to Android devices/emulators and iOS simulators on the host system
 
 ## 🛠 Installation
@@ -41,7 +42,7 @@ pip install -r requirements.txt
 
 # Copy and configure environment
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your backend server configuration
 ```
 
 ### Docker Deployment
@@ -55,68 +56,75 @@ docker-compose up -d
 
 ## 🏃‍♂️ Quick Start
 
-### Start the Server
+### Configure Backend Server
 ```bash
-# Development
-python -m src.websocket.server
-
-# Production with Docker
-docker run -p 8765:8765 mobile-automation
+# Set your backend server URL
+export BACKEND_SERVER_URL="wss://your-backend-server.com/ws"
 ```
 
-The server will start at `ws://localhost:8765` by default.
+### Start the Client
+
+```bash
+# Development
+python src/client_main.py
+
+# Production with Docker
+docker run mobile-automation
+```
+
+The client will connect to your backend server and wait for automation commands.
 
 ### Test the Service
 ```bash
-# List available devices
-python scripts/ws_client.py --action mobile_list_available_devices
+# Run automated tests
+python scripts/test_client.py
 
-# Auto-select a device
-python scripts/ws_client.py --action mobile_use_default_device
+# Run interactive tests
+python scripts/test_client.py --interactive
 
-# Take a screenshot
-python scripts/ws_client.py --action mobile_take_screenshot
+# Test specific functionality
+python scripts/test_client.py --test devices
 ```
 
-## 📡 WebSocket API
+## 📡 WebSocket Protocol
 
 ### Message Format
 
-**Request:**
+**Command from Backend Server:**
 ```json
 {
-  "id": "unique_request_id",
+  "id": "cmd-123",
+  "type": "automation_command",
   "action": "mobile_take_screenshot",
   "params": {
-    "x": 100,
-    "y": 200
+    "device_id": "emulator-5554"
   },
   "timestamp": "2025-01-01T00:00:00Z"
 }
 ```
 
-**Response (Success):**
+**Result to Backend Server (Success):**
 ```json
 {
-  "id": "unique_request_id",
+  "id": "cmd-123",
+  "type": "automation_result",
   "success": true,
   "data": {
-    "image_base64": "iVBORw0KGgoAAAANSU..."
+    "screenshot": "iVBORw0KGgoAAAANSU..."
   },
-  "error": null,
   "timestamp": "2025-01-01T00:00:01Z"
 }
 ```
 
-**Response (Error):**
+**Result to Backend Server (Error):**
 ```json
 {
-  "id": "unique_request_id",
+  "id": "cmd-123",
+  "type": "automation_result",
   "success": false,
-  "data": null,
   "error": {
     "type": "ActionableError",
-    "message": "No device selected. Use mobile_use_default_device first.",
+    "message": "No device selected",
     "code": "NO_DEVICE_SELECTED"
   },
   "timestamp": "2025-01-01T00:00:01Z"
@@ -155,34 +163,39 @@ python scripts/ws_client.py --action mobile_take_screenshot
 
 ## 🏗 Architecture
 
-The service follows a layered architecture with clear separation of concerns:
+The service follows a client-server architecture where the mobile automation service acts as a WebSocket client:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                WebSocket Communication Layer                │
-│  - Connection management and session handling              │
-│  - Message routing and error handling                      │
+│                    Your Backend Server                      │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │              WebSocket Server                           │ │
+│  │  - Handles business logic                              │ │
+│  │  - Manages user sessions                               │ │
+│  │  - Sends automation commands                           │ │
+│  │  - Receives results                                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
+                              │
+                              │ WebSocket Connection
+                              │ (with retry/fallback)
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Device Manager                          │
-│  - Multi-platform device discovery                        │
-│  - Robot instantiation and lifecycle                      │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                   Robot Abstraction                        │
-│  - Common interface for all device operations             │
-│  - Error handling and response normalization              │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│              Platform Implementations                       │
-│  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │   Android ADB   │  │  iOS WDA/simctl │                  │
-│  │   Integration   │  │   Integration   │                  │
-│  └─────────────────┘  └─────────────────┘                  │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                     Utility Layer                          │
-│  - Logging, Configuration, Image Processing               │
+│              Mobile Automation Service                      │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │            WebSocket Client                             │ │
+│  │  - Connects to backend server                          │ │
+│  │  - Handles connection retry/fallback                   │ │
+│  │  - Receives automation commands                        │ │
+│  │  - Executes local device operations                    │ │
+│  │  - Sends results back                                  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │            Device Manager                               │ │
+│  │  - Android/iOS device detection                        │ │
+│  │  - Robot instantiation                                 │ │
+│  │  - Local automation execution                          │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -201,24 +214,22 @@ pytest tests/integration/
 ```
 
 ### Manual Testing
-See [`docs/TESTING.md`](docs/TESTING.md) for comprehensive testing procedures and examples.
+See [`docs/CLIENT_TESTING.md`](docs/CLIENT_TESTING.md) for comprehensive testing procedures and examples.
 
 ## 📝 Configuration
 
 All configuration is handled via environment variables. Copy `.env.example` to `.env` and customize:
 
 ```bash
-# WebSocket Server
-WEBSOCKET_HOST=localhost
-WEBSOCKET_PORT=8765
+# Backend Server
+BACKEND_SERVER_URL=wss://your-backend-server.com/ws
+CONNECTION_RETRY_MAX=5
+CONNECTION_RETRY_DELAY=1.0
+HEALTH_CHECK_INTERVAL=30
 
 # Device Paths
 ADB_PATH=adb
 SIMCTL_PATH=xcrun simctl
-
-# Security
-WEBSOCKET_AUTH_ENABLED=false
-WEBSOCKET_AUTH_TOKEN=your-secret-token
 
 # Logging
 LOG_LEVEL=INFO
@@ -233,32 +244,28 @@ version: '3.8'
 services:
   mobile-automation:
     build: .
-    ports:
-      - "8765:8765"
     environment:
+      - BACKEND_SERVER_URL=wss://your-backend-server.com/ws
       - LOG_LEVEL=INFO
-      - WEBSOCKET_HOST=0.0.0.0
+      - CONNECTION_RETRY_MAX=5
     volumes:
       - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD", "python", "scripts/health_check.py"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    command: ["python", "src/client_main.py"]
 ```
 
 ### Monitoring
-- Health check endpoint available via `scripts/health_check.py`
+- Connection health monitoring with automatic reconnection
 - Structured logging with configurable levels
-- Optional telemetry and metrics collection
+- Device availability tracking
+- Performance metrics collection
 
 ## 🔒 Security Considerations
 
-- WebSocket authentication disabled by default (enable with `WEBSOCKET_AUTH_ENABLED=true`)
+- Use secure WebSocket connections (wss://) in production
 - Non-root user in Docker container
 - Input validation via Pydantic models
-- Configurable rate limiting (planned)
 - Secure device access patterns
+- Centralized authentication via backend server
 
 ## 🤝 Contributing
 
@@ -277,9 +284,14 @@ services:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📚 Documentation
+
+- [`docs/CLIENT_ARCHITECTURE.md`](docs/CLIENT_ARCHITECTURE.md) - Detailed architecture documentation
+- [`docs/CLIENT_USAGE.md`](docs/CLIENT_USAGE.md) - Usage guide and configuration
+- [`docs/CLIENT_TESTING.md`](docs/CLIENT_TESTING.md) - Comprehensive testing guide
+
 ## 🙏 Acknowledgments
 
-- Original TypeScript implementation architecture
 - WebDriverAgent project for iOS automation
 - Android SDK and ADB for Android automation
 - Python asyncio and WebSocket communities

@@ -1,12 +1,12 @@
 """Device manager for mobile automation service."""
 
 from typing import List, Optional, Dict, Any, Union
-from src.robot import Robot, ActionableError
-from src.types import DeviceInfo, DeviceType
-from src.android.android_robot import AndroidDeviceManager, AndroidRobot
-from src.ios.ios_robot import SimctlManager, IosRobot
-from src.config import config
-from src.utils.logger import get_logger
+from robot import Robot, ActionableError
+from enums import DeviceInfo, DeviceType
+from android.android_robot import AndroidDeviceManager, AndroidRobot
+from ios.ios_robot import SimctlManager, IosRobot
+from config import config
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
